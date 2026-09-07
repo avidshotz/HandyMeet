@@ -102,8 +102,13 @@ pub fn cancel_current_operation(app: &AppHandle) {
     set_tray_state(app, crate::tray::TrayIconState::Idle);
     hide_recording_overlay(app);
 
-    // Unload model if immediate unload is enabled
-    tm.maybe_unload_immediately("cancellation");
+    // Unload model if immediate unload is enabled. Skip while a meeting is
+    // still using the shared transcription engine.
+    if crate::managers::meeting::MeetingManager::meeting_is_recording(app) {
+        info!("Skipping model unload because a meeting is still recording");
+    } else {
+        tm.maybe_unload_immediately("cancellation");
+    }
 
     // Notify coordinator so it can keep lifecycle state coherent.
     if let Some(coordinator) = app.try_state::<TranscriptionCoordinator>() {

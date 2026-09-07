@@ -470,6 +470,11 @@ impl ShortcutAction for TranscribeAction {
         let start_time = Instant::now();
         debug!("TranscribeAction::start called for binding: {}", binding_id);
 
+        if crate::managers::meeting::MeetingManager::meeting_is_recording(app) {
+            debug!("Ignoring dictation shortcut while a meeting is recording");
+            return;
+        }
+
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();

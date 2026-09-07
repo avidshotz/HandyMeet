@@ -17,6 +17,29 @@ Handy was created to fill the gap for a truly open source, extensible speech-to-
 
 Handy isn't trying to be the best speech-to-text app—it's trying to be the most forkable one.
 
+## Meeting notes (this fork)
+
+This checkout adds a **Meetings** tab on top of Handy:
+
+1. **Start meeting** to capture your **microphone and computer speakers** at the same time (Zoom, Teams, Meet, or anything playing through the PC).
+2. Speech from your mic is labelled as **you**. Voices coming through the speakers are split into **Speaker 1, Speaker 2, …** You can click a name to rename it; introductions like “I’m Alex” are used as hints.
+3. When you stop, HandyMeet writes a NoteCatcher-shaped markdown file into Head Secretary’s `unprocessed/` inbox (`YYYY-MM-DD_HHMM_Title.md`) and asks Head Secretary to rescan. **Summary, action items, and decisions are not generated here** — that LLM pass belongs to Head Secretary or Note Catcher.
+
+**Windows:** system audio uses WASAPI loopback (what you hear in speakers/headphones).  
+**macOS:** pick Auto if a loopback device such as [BlackHole](https://existential.audio/blackhole/) is installed, or choose that device in the Meetings dropdown. Grant microphone (and system audio / screen recording if prompted).  
+**Linux:** Auto uses a PulseAudio/PipeWire monitor source when one exists.
+
+Dictation shortcuts still work as in upstream Handy.
+
+**Git remotes:** `origin` is [avidshotz/HandyMeet](https://github.com/avidshotz/HandyMeet) (this fork). `upstream` stays [cjpais/Handy](https://github.com/cjpais/Handy) so Handy updates can be pulled without losing meeting mode:
+
+```bash
+git fetch upstream
+git merge upstream/main
+```
+
+On GitHub, use **Sync fork** to update `main` from Handy, then merge `main` into `meeting-notes`.
+
 ## How It Works
 
 1. **Press** a configurable keyboard shortcut: hold it to record and release to stop, or tap it to toggle recording on and off (Hold-only and Toggle-only modes are also available)

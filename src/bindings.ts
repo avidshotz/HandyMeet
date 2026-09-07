@@ -920,6 +920,110 @@ async isLaptop() : Promise<Result<boolean, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async startMeeting(options: MeetingStartOptions) : Promise<Result<MeetingRecord, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting", { options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopMeeting() : Promise<Result<MeetingRecord, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_meeting") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listMeetings() : Promise<Result<MeetingListItem[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_meetings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeeting(id: number) : Promise<Result<MeetingRecord, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async renameMeetingSpeaker(meetingId: number, speakerId: string, displayName: string) : Promise<Result<MeetingRecord, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_meeting_speaker", { meetingId, speakerId, displayName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteMeeting(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async exportMeetingMarkdown(id: number) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_markdown", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveMeetingMarkdown(id: number) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_markdown", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listSystemAudioDevices() : Promise<Result<SystemAudioDevice[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_system_audio_devices") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingYourName() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_your_name") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setMeetingYourName(name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_meeting_your_name", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async isMeetingRecording() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_meeting_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getActiveMeeting() : Promise<Result<MeetingRecord | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_meeting") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -929,11 +1033,15 @@ async isLaptop() : Promise<Result<boolean, string>> {
 export const events = __makeEvents__<{
 historyUpdatePayload: HistoryUpdatePayload,
 streamPhaseEvent: StreamPhaseEvent,
-streamTextEvent: StreamTextEvent
+streamTextEvent: StreamTextEvent,
+meetingUtteranceEvent: MeetingUtteranceEvent,
+meetingStateEvent: MeetingStateEvent
 }>({
 historyUpdatePayload: "history-update-payload",
 streamPhaseEvent: "stream-phase-event",
-streamTextEvent: "stream-text-event"
+streamTextEvent: "stream-text-event",
+meetingUtteranceEvent: "meeting-utterance-event",
+meetingStateEvent: "meeting-state-event"
 })
 
 /** user-defined constants **/
@@ -1037,6 +1145,17 @@ key_down: number; key_up: number; flags_changed: number; mouse: number; duration
 export type KeyboardImplementation = "tauri" | "handy_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+export type AudioSource = "microphone" | "system"
+export type MeetingListItem = { id: number; title: string; started_at: number; ended_at: number | null; status: MeetingStatus; utterance_count: number }
+export type MeetingNotes = { summary: string; action_items: string[]; decisions: string[] }
+export type MeetingRecord = { id: number; title: string; started_at: number; ended_at: number | null; your_name: string; status: MeetingStatus; notes: MeetingNotes; speakers: MeetingSpeaker[]; utterances: MeetingUtterance[] }
+export type MeetingSpeaker = { speaker_id: string; display_name: string }
+export type MeetingStartOptions = { title: string | null; your_name: string | null; system_audio_device: string | null }
+export type MeetingStateEvent = { meeting: MeetingRecord }
+export type MeetingStatus = "recording" | "processing" | "done"
+export type MeetingUtterance = { id: number; meeting_id: number; speaker_id: string; speaker_name: string; source: AudioSource; start_ms: number; end_ms: number; text: string }
+export type MeetingUtteranceEvent = { utterance: MeetingUtterance }
+export type SystemAudioDevice = { name: string; is_default: boolean }
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 /**

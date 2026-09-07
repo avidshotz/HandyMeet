@@ -15,6 +15,7 @@
     "advanced": "Advanced",
     "postProcessing": "Post Process",
     "history": "History",
+    "meetings": "Meetings",
     "debug": "Debug",
     "about": "About"
   },
@@ -706,5 +707,35 @@
     "learnMore": "How to fix",
     "recorderBlocked": "Can't record shortcuts right now — macOS Secure Input is blocking key events. Resolve the Secure Input warning first.",
     "dismiss": "Dismiss"
+  },
+  "meetings": {
+    "title": "Meeting notes",
+    "subtitle": "Captures your mic and speakers as a speaker-labelled transcript. Head Secretary or Note Catcher writes the summary and action items.",
+    "past": "Past meetings",
+    "emptyList": "No meetings yet",
+    "titlePlaceholder": "Meeting title (optional)",
+    "yourName": "Your name",
+    "systemAudioAuto": "System audio (auto)",
+    "start": "Start meeting",
+    "stop": "Stop & notes",
+    "live": "Live",
+    "speakers": "People",
+    "renameSpeaker": "Click to rename",
+    "summary": "Inbox",
+    "actionItems": "Action items",
+    "decisions": "Decisions",
+    "waiting": "Listening… speech will appear here.",
+    "idleHint": "Start a meeting to capture the call. When you stop, the transcript goes to Head Secretary’s inbox.",
+    "copy": "Copy notes",
+    "save": "Save markdown",
+    "delete": "Delete",
+    "copied": "Notes copied",
+    "startFailed": "Could not start meeting",
+    "stopFailed": "Could not stop meeting",
+    "loadFailed": "Could not open meeting",
+    "renameFailed": "Could not rename speaker",
+    "deleteFailed": "Could not delete meeting",
+    "exportFailed": "Could not export notes",
+    "utteranceCount": "{{count}} lines"
   }
 }

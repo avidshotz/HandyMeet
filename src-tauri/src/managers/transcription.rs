@@ -324,11 +324,14 @@ impl TranscriptionManager {
                         continue;
                     }
 
-                    // While recording, keep the idle timer fresh so the
-                    // model is never unloaded mid-session.
+                    // While recording (dictation or a meeting), keep the idle
+                    // timer fresh so the model is never unloaded mid-session.
                     let is_recording = app_handle_cloned
                         .try_state::<Arc<AudioRecordingManager>>()
-                        .is_some_and(|a| a.is_recording());
+                        .is_some_and(|a| a.is_recording())
+                        || crate::managers::meeting::MeetingManager::meeting_is_recording(
+                            &app_handle_cloned,
+                        );
                     if is_recording {
                         manager_cloned.touch_activity();
                         continue;
@@ -457,6 +460,9 @@ impl TranscriptionManager {
 
     /// Unloads the model immediately if the setting is enabled and the model is loaded
     pub fn maybe_unload_immediately(&self, context: &str) {
+        if crate::managers::meeting::MeetingManager::meeting_is_recording(&self.app_handle) {
+            return;
+        }
         let settings = get_settings(&self.app_handle);
         if settings.model_unload_timeout == ModelUnloadTimeout::Immediately
             && self.is_model_loaded()
