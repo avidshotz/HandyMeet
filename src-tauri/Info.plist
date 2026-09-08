@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Request microphone access to transcribe audio locally</string>
+  <string>HandyMeet requests microphone access to transcribe audio locally</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Handy captures system audio so meeting notes can include other people on the call.</string>
+  <string>HandyMeet captures system audio so meeting notes can include other people on the call.</string>
   <key>NSScreenCaptureUsageDescription</key>
-  <string>Handy may request screen recording permission to capture system audio during meetings.</string>
+  <string>HandyMeet may request screen recording permission to capture system audio during meetings.</string>
 </dict>
 </plist>

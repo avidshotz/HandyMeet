@@ -791,12 +791,20 @@ pub fn run(cli_args: CliArgs) {
         ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
-    specta_builder
-        .export(
-            Typescript::default().bigint(BigIntExportBehavior::Number),
-            "../src/bindings.ts",
-        )
-        .expect("Failed to export typescript bindings");
+    if let Err(err) = specta_builder.export(
+        Typescript::default().bigint(BigIntExportBehavior::Number),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts"),
+    ) {
+        // Dev-only convenience (keeps bindings.ts in sync with the Rust side).
+        // The path used to be relative to the process's *runtime* cwd, which
+        // only ever matched the source tree when launched via `cargo`/`tauri
+        // dev` from inside the project — any other launch (Finder, `open`, a
+        // desktop shortcut, cwd=/) hit a different filesystem location (e.g.
+        // read-only "/") and this `.expect()` used to panic the whole app on
+        // startup before anything else had a chance to run. Never let this
+        // best-effort codegen step take down the app.
+        log::warn!("Failed to export typescript bindings: {err}");
+    }
 
     let invoke_handler = specta_builder.invoke_handler();
 

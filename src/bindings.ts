@@ -907,20 +907,6 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Checks if the Mac is a laptop by detecting battery presence
- * 
- * This uses pmset to check for battery information.
- * Returns true if a battery is detected (laptop), false otherwise (desktop)
- */
-async isLaptop() : Promise<Result<boolean, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("is_laptop") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async startMeeting(options: MeetingStartOptions) : Promise<Result<MeetingRecord, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("start_meeting", { options }) };
@@ -1024,6 +1010,20 @@ async getActiveMeeting() : Promise<Result<MeetingRecord | null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Checks if the Mac is a laptop by detecting battery presence
+ * 
+ * This uses pmset to check for battery information.
+ * Returns true if a battery is detected (laptop), false otherwise (desktop)
+ */
+async isLaptop() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_laptop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1032,16 +1032,16 @@ async getActiveMeeting() : Promise<Result<MeetingRecord | null, string>> {
 
 export const events = __makeEvents__<{
 historyUpdatePayload: HistoryUpdatePayload,
-streamPhaseEvent: StreamPhaseEvent,
-streamTextEvent: StreamTextEvent,
+meetingStateEvent: MeetingStateEvent,
 meetingUtteranceEvent: MeetingUtteranceEvent,
-meetingStateEvent: MeetingStateEvent
+streamPhaseEvent: StreamPhaseEvent,
+streamTextEvent: StreamTextEvent
 }>({
 historyUpdatePayload: "history-update-payload",
-streamPhaseEvent: "stream-phase-event",
-streamTextEvent: "stream-text-event",
+meetingStateEvent: "meeting-state-event",
 meetingUtteranceEvent: "meeting-utterance-event",
-meetingStateEvent: "meeting-state-event"
+streamPhaseEvent: "stream-phase-event",
+streamTextEvent: "stream-text-event"
 })
 
 /** user-defined constants **/
@@ -1114,6 +1114,7 @@ vad_backend?: VadBackend;
  */
 overlay_style?: OverlayStyle }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
+export type AudioSource = "microphone" | "system"
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
@@ -1145,7 +1146,6 @@ key_down: number; key_up: number; flags_changed: number; mouse: number; duration
 export type KeyboardImplementation = "tauri" | "handy_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
-export type AudioSource = "microphone" | "system"
 export type MeetingListItem = { id: number; title: string; started_at: number; ended_at: number | null; status: MeetingStatus; utterance_count: number }
 export type MeetingNotes = { summary: string; action_items: string[]; decisions: string[] }
 export type MeetingRecord = { id: number; title: string; started_at: number; ended_at: number | null; your_name: string; status: MeetingStatus; notes: MeetingNotes; speakers: MeetingSpeaker[]; utterances: MeetingUtterance[] }
@@ -1155,7 +1155,6 @@ export type MeetingStateEvent = { meeting: MeetingRecord }
 export type MeetingStatus = "recording" | "processing" | "done"
 export type MeetingUtterance = { id: number; meeting_id: number; speaker_id: string; speaker_name: string; source: AudioSource; start_ms: number; end_ms: number; text: string }
 export type MeetingUtteranceEvent = { utterance: MeetingUtterance }
-export type SystemAudioDevice = { name: string; is_default: boolean }
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 /**
@@ -1282,6 +1281,7 @@ export type StreamTextEvent = { committed: string; tentative: string }
  * Semantic kind of "working" phase, used to localize the spinner label.
  */
 export type StreamWorkKind = "transcribing" | "polishing"
+export type SystemAudioDevice = { name: string; is_default: boolean }
 /**
  * UI appearance mode. `System` follows the OS `prefers-color-scheme`; `Light`
  * and `Dark` force one of the two palettes Handy already ships.

@@ -9,6 +9,7 @@ use crate::meeting::types::{
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::get_settings;
+use anyhow::Result;
 use chrono::Local;
 use log::{info, warn};
 use std::collections::HashMap;
