@@ -1012,6 +1012,39 @@ async getActiveMeeting() : Promise<Result<MeetingRecord | null, string>> {
 }
 },
 /**
+ * Whether meetings cluster distinct voices (Speaker 1/2/3...) on both the
+ * mic and system audio using a small on-device ML model, instead of just
+ * the lightweight always-on heuristic for system audio.
+ */
+async getMeetingSpeakerIdEnabled() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_speaker_id_enabled") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setMeetingSpeakerIdEnabled(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_meeting_speaker_id_enabled", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whether the speaker-ID model has finished downloading (so the frontend
+ * can show "downloading..." vs "ready" without polling the filesystem).
+ */
+async isMeetingSpeakerIdModelReady() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_meeting_speaker_id_model_ready") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
  * This uses pmset to check for battery information.
@@ -1085,7 +1118,14 @@ hold_threshold_ms?: number; audio_feedback?: boolean; audio_feedback_volume?: nu
  * upgrading from before this key existed are blanked by the migration so they
  * see the current release's notes — see `apply_settings_migrations`.
  */
-whats_new_last_seen_version?: string; selected_model?: string; onboarding_completed?: boolean; always_on_microphone?: boolean; selected_microphone?: string | null; 
+whats_new_last_seen_version?: string; selected_model?: string; onboarding_completed?: boolean; always_on_microphone?: boolean; 
+/**
+ * Cluster distinct voices during meetings (Speaker 1/2/3...) using a small
+ * on-device ML voice-embedding model, applied to both the mic and system
+ * audio channels. When off, only system audio gets the lightweight
+ * heuristic clustering that always ran; the mic stays labeled "you".
+ */
+meeting_speaker_id_enabled?: boolean; selected_microphone?: string | null; 
 /**
  * Which input channel to use on the selected microphone device.
  * None means "average all channels" (original behavior).

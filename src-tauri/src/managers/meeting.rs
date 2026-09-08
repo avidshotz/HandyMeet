@@ -1,6 +1,7 @@
 use crate::meeting::capture::{self, CaptureHandle};
 use crate::meeting::diarize::{self, SpeakerTracker};
 use crate::meeting::notes;
+use crate::meeting::speaker_id::{self, SpeakerEmbedder};
 use crate::meeting::store::MeetingStore;
 use crate::meeting::types::{
     AudioSource, MeetingListItem, MeetingRecord, MeetingStartOptions, MeetingStatus,
@@ -65,6 +66,7 @@ pub struct MeetingManager {
     app_handle: AppHandle,
     store: Mutex<MeetingStore>,
     session: Mutex<Option<LiveSession>>,
+    speaker_embedder: Mutex<Option<Arc<SpeakerEmbedder>>>,
 }
 
 impl MeetingManager {
@@ -74,7 +76,46 @@ impl MeetingManager {
             app_handle: app_handle.clone(),
             store: Mutex::new(MeetingStore::new(app_data_dir)?),
             session: Mutex::new(None),
+            speaker_embedder: Mutex::new(None),
         })
+    }
+
+    /// Returns the cached ML speaker-embedding backend if the setting is on
+    /// and the model has already been downloaded; otherwise `None`, in which
+    /// case callers fall back to the lightweight heuristic. Never blocks on
+    /// a download — if the model isn't there yet, kicks one off in the
+    /// background (fire-and-forget) so it's ready for a future meeting.
+    fn speaker_embedder_if_ready(&self) -> Option<Arc<SpeakerEmbedder>> {
+        if !get_settings(&self.app_handle).meeting_speaker_id_enabled {
+            return None;
+        }
+
+        if let Some(embedder) = self.speaker_embedder.lock().unwrap().as_ref() {
+            return Some(embedder.clone());
+        }
+
+        if !speaker_id::is_model_ready(&self.app_handle) {
+            let app = self.app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = speaker_id::ensure_model_downloaded(&app).await {
+                    warn!("Speaker-ID model download failed: {err}");
+                }
+            });
+            return None;
+        }
+
+        let path = speaker_id::model_path(&self.app_handle).ok()?;
+        match SpeakerEmbedder::load(&path) {
+            Ok(embedder) => {
+                let embedder = Arc::new(embedder);
+                *self.speaker_embedder.lock().unwrap() = Some(embedder.clone());
+                Some(embedder)
+            }
+            Err(err) => {
+                warn!("Failed to load speaker-ID model: {err}");
+                None
+            }
+        }
     }
 
     pub fn is_recording(&self) -> bool {
@@ -157,10 +198,21 @@ impl MeetingManager {
         let app = self.app_handle.clone();
         let your_name_clone = your_name.clone();
         let worker_stop = Arc::clone(&stop);
+        let speaker_id_enabled = settings.meeting_speaker_id_enabled;
+        let embedder = self.speaker_embedder_if_ready();
         let worker = thread::Builder::new()
             .name("meeting-session".into())
             .spawn(move || {
-                run_session(app, meeting_id, your_name_clone, started_at, frame_rx, worker_stop);
+                run_session(
+                    app,
+                    meeting_id,
+                    your_name_clone,
+                    started_at,
+                    frame_rx,
+                    worker_stop,
+                    speaker_id_enabled,
+                    embedder,
+                );
             })
             .map_err(|e| e.to_string())?;
 
@@ -280,6 +332,8 @@ fn run_session(
     started_at: i64,
     frame_rx: mpsc::Receiver<(AudioSource, Vec<f32>)>,
     stop: Arc<AtomicBool>,
+    speaker_id_enabled: bool,
+    embedder: Option<Arc<SpeakerEmbedder>>,
 ) {
     let Some(manager) = app.try_state::<Arc<MeetingManager>>() else {
         warn!("Meeting manager missing in session thread");
@@ -311,7 +365,13 @@ fn run_session(
 
     let mut mic_vad = SourceVad::new();
     let mut sys_vad = SourceVad::new();
-    let mut tracker = SpeakerTracker::default();
+    // System audio has always been clustered into distinct speakers; that
+    // stays on unconditionally (now optionally ML-backed). The mic only gets
+    // its own tracker (mic could have multiple in-person voices) when the
+    // setting is on — off by default reproduces the old "mic is always you"
+    // behavior exactly.
+    let mut mic_tracker = SpeakerTracker::new(embedder.clone());
+    let mut sys_tracker = SpeakerTracker::new(embedder);
     let origin = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
@@ -326,7 +386,7 @@ fn run_session(
                         AudioSource::Microphone,
                         "you",
                         &your_name,
-                        None,
+                        speaker_id_enabled.then_some(&mut mic_tracker),
                         &job_tx,
                     ),
                     AudioSource::System => push_vad(
@@ -334,9 +394,9 @@ fn run_session(
                         &frame,
                         elapsed,
                         AudioSource::System,
-                        "spk_pending",
+                        "spk_1",
                         "Speaker",
-                        Some(&mut tracker),
+                        Some(&mut sys_tracker),
                         &job_tx,
                     ),
                 }
@@ -352,16 +412,16 @@ fn run_session(
         AudioSource::Microphone,
         "you",
         &your_name,
-        None,
+        speaker_id_enabled.then_some(&mut mic_tracker),
         &job_tx,
     );
     flush_vad(
         &mut sys_vad,
         origin.elapsed().as_millis() as i64,
         AudioSource::System,
-        "spk_pending",
+        "spk_1",
         "Speaker",
-        Some(&mut tracker),
+        Some(&mut sys_tracker),
         &job_tx,
     );
     drop(job_tx);
@@ -585,14 +645,18 @@ fn emit_job(
         return;
     }
     let audio = std::mem::take(&mut vad.buffer);
-    let (speaker_id, speaker_name) = if source == AudioSource::System {
-        if let Some(tracker) = tracker {
-            let id = tracker.assign_remote(&audio);
-            let name = diarize::default_remote_name(&id);
-            (id, name)
+    // `speaker_id` doubles as the seed label for this tracker's very first
+    // voice ("you" for the mic, "spk_1" for system audio) when a tracker is
+    // supplied; with no tracker it's just used verbatim (mic when speaker-ID
+    // clustering is off).
+    let (speaker_id, speaker_name) = if let Some(tracker) = tracker {
+        let id = tracker.assign(&audio, speaker_id);
+        let name = if id == "you" {
+            speaker_name.to_string()
         } else {
-            (speaker_id.to_string(), speaker_name.to_string())
-        }
+            diarize::default_remote_name(&id)
+        };
+        (id, name)
     } else {
         (speaker_id.to_string(), speaker_name.to_string())
     };

@@ -1,24 +1,53 @@
+use super::speaker_id::SpeakerEmbedder;
 use regex::Regex;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 const EMBED_BINS: usize = 32;
-const NEW_SPEAKER_THRESHOLD: f32 = 0.62;
+// Cosine-similarity cutoffs for "same speaker as an existing centroid" — tuned
+// separately per backend since the FFT heuristic and the ML embedding space
+// have different similarity distributions. The ML value matches sherpa-onnx's
+// own speaker-embedding example default.
+const NEW_SPEAKER_THRESHOLD_HEURISTIC: f32 = 0.62;
+const NEW_SPEAKER_THRESHOLD_ML: f32 = 0.6;
 
 #[derive(Default)]
 pub struct SpeakerTracker {
+    embedder: Option<Arc<SpeakerEmbedder>>,
     next_index: usize,
     centroids: Vec<(String, Vec<f32>)>,
 }
 
 impl SpeakerTracker {
-    pub fn assign_remote(&mut self, audio: &[f32]) -> String {
-        let embedding = spectral_embedding(audio);
+    pub fn new(embedder: Option<Arc<SpeakerEmbedder>>) -> Self {
+        Self {
+            embedder,
+            next_index: 0,
+            centroids: Vec::new(),
+        }
+    }
+
+    /// Assign (or create) a speaker id for `audio`. `first_speaker_id` names
+    /// the very first voice this tracker ever sees (e.g. "you" for the mic
+    /// channel, or "spk_1" for a channel with no fixed identity) — every
+    /// later *distinct* voice still gets an auto-incrementing "spk_N" label.
+    pub fn assign(&mut self, audio: &[f32], first_speaker_id: &str) -> String {
+        let (embedding, threshold) = match self.embedder.as_ref().and_then(|e| e.embed(audio)) {
+            Some(embedding) => (embedding, NEW_SPEAKER_THRESHOLD_ML),
+            None => (spectral_embedding(audio), NEW_SPEAKER_THRESHOLD_HEURISTIC),
+        };
+
         let mut best_id = None;
         let mut best_sim = -1.0_f32;
         for (id, centroid) in &self.centroids {
+            // Embeddings from different backends aren't comparable; only
+            // match against centroids of the same dimension (i.e. the same
+            // backend that's currently active for this tracker/session).
+            if centroid.len() != embedding.len() {
+                continue;
+            }
             let sim = cosine(&embedding, centroid);
             if sim > best_sim {
                 best_sim = sim;
@@ -26,15 +55,23 @@ impl SpeakerTracker {
             }
         }
         if let Some(id) = best_id {
-            if best_sim >= NEW_SPEAKER_THRESHOLD {
+            if best_sim >= threshold {
                 if let Some((_, centroid)) = self.centroids.iter_mut().find(|(cid, _)| cid == &id) {
                     blend(centroid, &embedding, 0.2);
                 }
                 return id;
             }
         }
+
+        // Always reserve the next "spk_N" slot, even for the seeded first
+        // speaker (whose *returned* id may be a custom label like "you") —
+        // otherwise the first genuinely new voice would collide with it.
         self.next_index += 1;
-        let id = format!("spk_{}", self.next_index);
+        let id = if self.centroids.is_empty() {
+            first_speaker_id.to_string()
+        } else {
+            format!("spk_{}", self.next_index)
+        };
         self.centroids.push((id.clone(), embedding));
         id
     }

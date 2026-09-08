@@ -60,6 +60,8 @@ export const MeetingsView: React.FC = () => {
   const [title, setTitle] = useState("");
   const [systemDevices, setSystemDevices] = useState<SystemAudioDevice[]>([]);
   const [systemDevice, setSystemDevice] = useState("auto");
+  const [speakerIdEnabled, setSpeakerIdEnabled] = useState(false);
+  const [speakerIdModelReady, setSpeakerIdModelReady] = useState(false);
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
   const [speakerDraft, setSpeakerDraft] = useState("");
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -72,14 +74,18 @@ export const MeetingsView: React.FC = () => {
   useEffect(() => {
     const boot = async () => {
       try {
-        const [name, devices, current, rec] = await Promise.all([
+        const [name, devices, current, rec, speakerId, modelReady] = await Promise.all([
           commands.getMeetingYourName(),
           commands.listSystemAudioDevices(),
           commands.getActiveMeeting(),
           commands.isMeetingRecording(),
+          commands.getMeetingSpeakerIdEnabled(),
+          commands.isMeetingSpeakerIdModelReady(),
         ]);
         setYourName(unwrap(name));
         setSystemDevices(unwrap(devices));
+        setSpeakerIdEnabled(unwrap(speakerId));
+        setSpeakerIdModelReady(unwrap(modelReady));
         const meeting = unwrap(current);
         if (meeting) {
           setActive(meeting);
@@ -133,6 +139,28 @@ export const MeetingsView: React.FC = () => {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [active?.utterances.length]);
+
+  const toggleSpeakerId = async (checked: boolean) => {
+    const previous = speakerIdEnabled;
+    setSpeakerIdEnabled(checked);
+    try {
+      unwrap(await commands.setMeetingSpeakerIdEnabled(checked));
+      if (checked && !speakerIdModelReady) {
+        // The model downloads in the background; one delayed re-check is
+        // enough to flip the hint once it's done without polling forever.
+        setTimeout(() => {
+          void commands.isMeetingSpeakerIdModelReady().then((result) => {
+            setSpeakerIdModelReady(unwrap(result));
+          });
+        }, 4000);
+      }
+    } catch (error) {
+      setSpeakerIdEnabled(previous);
+      toast.error(t("meetings.speakerIdToggleFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   const startMeeting = async () => {
     setBusy(true);
@@ -308,6 +336,23 @@ export const MeetingsView: React.FC = () => {
               ))}
             </select>
           </div>
+          <label className="flex items-start gap-2 text-xs text-text/70">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={speakerIdEnabled}
+              disabled={recording}
+              onChange={(event) => void toggleSpeakerId(event.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-text">{t("meetings.speakerIdToggle")}</span>
+              {" — "}
+              {t("meetings.speakerIdHint")}
+              {speakerIdEnabled && !speakerIdModelReady && (
+                <span className="italic"> {t("meetings.speakerIdDownloading")}</span>
+              )}
+            </span>
+          </label>
           <div className="flex flex-wrap gap-2">
             {recording ? (
               <Button

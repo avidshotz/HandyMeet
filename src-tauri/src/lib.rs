@@ -780,6 +780,9 @@ pub fn run(cli_args: CliArgs) {
             commands::meeting::set_meeting_your_name,
             commands::meeting::is_meeting_recording,
             commands::meeting::get_active_meeting,
+            commands::meeting::get_meeting_speaker_id_enabled,
+            commands::meeting::set_meeting_speaker_id_enabled,
+            commands::meeting::is_meeting_speaker_id_model_ready,
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![

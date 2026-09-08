@@ -110,6 +110,45 @@ pub fn get_active_meeting(app: AppHandle) -> Result<Option<MeetingRecord>, Strin
     }
 }
 
+/// Whether meetings cluster distinct voices (Speaker 1/2/3...) on both the
+/// mic and system audio using a small on-device ML model, instead of just
+/// the lightweight always-on heuristic for system audio.
+#[tauri::command]
+#[specta::specta]
+pub fn get_meeting_speaker_id_enabled(app: AppHandle) -> Result<bool, String> {
+    Ok(crate::settings::get_settings(&app).meeting_speaker_id_enabled)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_meeting_speaker_id_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = crate::settings::get_settings(&app);
+    settings.meeting_speaker_id_enabled = enabled;
+    crate::settings::write_settings(&app, settings);
+
+    if enabled {
+        // Fire-and-forget: get the ~29MB model in place now so it's ready by
+        // the time the user actually starts a meeting. Never blocks this
+        // call, and a meeting started before it finishes just uses the
+        // heuristic for that session.
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = crate::meeting::speaker_id::ensure_model_downloaded(&app).await {
+                log::warn!("Speaker-ID model download failed: {err}");
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Whether the speaker-ID model has finished downloading (so the frontend
+/// can show "downloading..." vs "ready" without polling the filesystem).
+#[tauri::command]
+#[specta::specta]
+pub fn is_meeting_speaker_id_model_ready(app: AppHandle) -> Result<bool, String> {
+    Ok(crate::meeting::speaker_id::is_model_ready(&app))
+}
+
 fn meeting_manager(app: &AppHandle) -> Result<Arc<MeetingManager>, String> {
     app.try_state::<Arc<MeetingManager>>()
         .map(|s| s.inner().clone())

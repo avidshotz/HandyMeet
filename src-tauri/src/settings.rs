@@ -405,6 +405,12 @@ pub struct AppSettings {
     pub onboarding_completed: bool,
     #[serde(default = "default_always_on_microphone")]
     pub always_on_microphone: bool,
+    /// Cluster distinct voices during meetings (Speaker 1/2/3...) using a small
+    /// on-device ML voice-embedding model, applied to both the mic and system
+    /// audio channels. When off, only system audio gets the lightweight
+    /// heuristic clustering that always ran; the mic stays labeled "you".
+    #[serde(default)]
+    pub meeting_speaker_id_enabled: bool,
     #[serde(default)]
     pub selected_microphone: Option<String>,
     /// Which input channel to use on the selected microphone device.
@@ -923,6 +929,7 @@ pub fn get_default_settings() -> AppSettings {
         selected_model: "".to_string(),
         onboarding_completed: false,
         always_on_microphone: false,
+        meeting_speaker_id_enabled: false,
         selected_microphone: None,
         selected_channel: None,
         clamshell_microphone: None,
