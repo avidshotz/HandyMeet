@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 use signal_hook::consts::SIGUSR1;
 #[cfg(unix)]
-use signal_hook::consts::SIGUSR2;
+use signal_hook::consts::{SIGINT, SIGTERM, SIGUSR2};
 #[cfg(unix)]
 use signal_hook::iterator::Signals;
 #[cfg(unix)]
@@ -53,6 +53,32 @@ pub fn setup_signal_handler(app_handle: AppHandle) {
             };
             debug!("Received {signal_name}");
             send_transcription_input(&app_handle, binding_id, signal_name);
+        }
+    });
+}
+
+/// Listen for SIGTERM/SIGINT and shut down through Tauri's normal exit path
+/// (`AppHandle::exit`, which fires `RunEvent::Exit` — stops an in-progress
+/// meeting cleanly, unloads the transcription model) instead of letting the
+/// OS's default disposition just kill the process outright.
+///
+/// This matters regardless of how the process was started: a plain
+/// `kill <pid>` / `killall handy` / Activity Monitor "Quit" all send SIGTERM,
+/// and none of those go through `tauri_plugin_single_instance` (that path
+/// only works between two instances the OS itself recognizes as "the same
+/// app" via LaunchServices, i.e. both launched through `open`/Finder/Dock —
+/// it does nothing for a directly-run binary, as `--quit` still does via
+/// the single-instance plugin for that specific case).
+#[cfg(unix)]
+pub fn setup_termination_handler(app_handle: AppHandle) {
+    let mut signals =
+        Signals::new([SIGTERM, SIGINT]).expect("failed to register termination signal handlers");
+    debug!("Termination signal handlers registered (SIGTERM, SIGINT)");
+    thread::spawn(move || {
+        if let Some(sig) = signals.forever().next() {
+            let name = if sig == SIGTERM { "SIGTERM" } else { "SIGINT" };
+            log::info!("Received {name}, shutting down cleanly");
+            app_handle.exit(0);
         }
     });
 }

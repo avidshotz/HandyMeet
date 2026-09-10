@@ -233,6 +233,8 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     // (#1660) — see signal_handle.rs.
     #[cfg(unix)]
     signal_handle::setup_signal_handler(app_handle.clone());
+    #[cfg(unix)]
+    signal_handle::setup_termination_handler(app_handle.clone());
 
     // The macOS activation policy for a start-hidden launch is applied before
     // the event loop runs (see `apply_startup_activation_policy`), not here:
@@ -625,6 +627,16 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(cli_args: CliArgs) {
+    // `--quit` normally never reaches here: tauri_plugin_single_instance
+    // intercepts it in the running instance's process and this (second)
+    // process just exits on its own, matching --cancel/--toggle-transcription.
+    // But if nothing is running to forward to, there's nothing to initialize
+    // either — exit immediately rather than starting a whole app just to sit
+    // there with the CLI flag ignored.
+    if cli_args.quit {
+        return;
+    }
+
     // Avoid ggml-metal residency-set teardown assertions when a native engine
     // outlives the Tauri shutdown sequence (#1902). This must happen before
     // transcribe-cpp initializes its Metal device. Advanced users can restore
@@ -886,6 +898,9 @@ pub fn run(cli_args: CliArgs) {
                 signal_handle::send_transcription_input(app, "transcribe_with_post_process", "CLI");
             } else if args.iter().any(|a| a == "--cancel") {
                 crate::utils::cancel_current_operation(app);
+            } else if args.iter().any(|a| a == "--quit") {
+                log::info!("Quitting on --quit from a second instance");
+                app.exit(0);
             } else {
                 // A second process was launched without remote-control flags
                 // (e.g. the binary run from a shell). On macOS, relaunching the
@@ -1104,8 +1119,19 @@ pub fn run(cli_args: CliArgs) {
             }
             show_main_window(app);
         }
-        // Teardown transcribe.cpp before exit
+        // Teardown before exit. Runs for every exit path — window close +
+        // Cmd+Q, tray Quit, `--quit`, or a system shutdown/logout signal —
+        // not just the ones we happen to think of. Stopping an in-progress
+        // meeting here (rather than relying on every caller to remember)
+        // is what actually prevents a meeting getting orphaned in
+        // "recording" status if the process goes down uncleanly.
         tauri::RunEvent::Exit => {
+            if let Some(mm) = app.try_state::<Arc<MeetingManager>>() {
+                if mm.is_recording() {
+                    log::info!("Stopping in-progress meeting for clean shutdown");
+                    let _ = mm.stop_meeting();
+                }
+            }
             if let Some(tm) = app.try_state::<Arc<TranscriptionManager>>() {
                 let _ = tm.unload_model();
             }

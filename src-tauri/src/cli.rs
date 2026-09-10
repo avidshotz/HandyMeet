@@ -24,6 +24,14 @@ pub struct CliArgs {
     #[arg(long)]
     pub cancel: bool,
 
+    /// Ask a running instance to quit cleanly (sent to running instance).
+    /// Use this instead of killing the process directly — it lets the app
+    /// close windows and run its normal shutdown path rather than being cut
+    /// off mid-write (e.g. mid-meeting, mid-database-write). A dev/ops
+    /// convenience for scripted restarts, not exposed in the UI.
+    #[arg(long)]
+    pub quit: bool,
+
     /// Enable debug mode with verbose logging
     #[arg(long)]
     pub debug: bool,
