@@ -59,7 +59,118 @@ impl MeetingStore {
                 value TEXT NOT NULL
             );",
         )?;
+
+        // Voiceprints, added to existing databases in place. Three separate things on purpose:
+        //   speaker_id    the cluster label inside one meeting ("spk_2"), what utterances point at
+        //   voiceprint_id a stable id for the voice itself, which outlives any label
+        //   embedding     the vector, so the same voice can be recognised in a later meeting
+        // Renaming a speaker touches only display_name, so a name you type can never damage the
+        // identity underneath it.
+        for (column, decl) in [
+            ("voiceprint_id", "TEXT"),
+            ("embedding", "TEXT"),
+            ("embedding_backend", "TEXT"),
+        ] {
+            let sql = format!("ALTER TABLE speakers ADD COLUMN {column} {decl}");
+            if let Err(err) = conn.execute(&sql, []) {
+                // "duplicate column name" just means an older run already added it.
+                if !err.to_string().contains("duplicate column") {
+                    return Err(err.into());
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// Fold one speaker into another: its utterances move across and the empty row goes.
+    ///
+    /// The surviving speaker keeps the name it already has, including one you typed. A merge
+    /// undoes a mistake the live pass made about *who was speaking*; it is not an opinion about
+    /// what they should be called.
+    pub fn merge_speakers(&self, meeting_id: i64, from: &str, into: &str) -> Result<()> {
+        if from == into {
+            return Ok(());
+        }
+        let conn = self.connect()?;
+        let name: Option<String> = conn
+            .query_row(
+                "SELECT display_name FROM speakers WHERE meeting_id = ?1 AND speaker_id = ?2",
+                params![meeting_id, into],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let name = name.unwrap_or_else(|| super::diarize::default_remote_name(into));
+        conn.execute(
+            "UPDATE utterances SET speaker_id = ?1, speaker_name = ?2
+             WHERE meeting_id = ?3 AND speaker_id = ?4",
+            params![into, name, meeting_id, from],
+        )?;
+        conn.execute(
+            "DELETE FROM speakers WHERE meeting_id = ?1 AND speaker_id = ?2",
+            params![meeting_id, from],
+        )?;
+        Ok(())
+    }
+
+    /// Store the voiceprint for a speaker. Never touches an existing display_name.
+    ///
+    /// Inserts rather than updates, because a voice can be heard without ever being transcribed —
+    /// someone says something the recogniser returns as empty, and no speaker row is written. A
+    /// plain UPDATE would change nothing and say nothing, losing the print in silence. On conflict
+    /// only the voiceprint columns are set, so a name you typed survives untouched.
+    pub fn save_voiceprint(
+        &self,
+        meeting_id: i64,
+        speaker_id: &str,
+        voiceprint_id: &str,
+        embedding: &[f32],
+        backend: &str,
+    ) -> Result<()> {
+        let conn = self.connect()?;
+        let vector = serde_json::to_string(embedding)?;
+        let fallback_name = super::diarize::default_remote_name(speaker_id);
+        conn.execute(
+            "INSERT INTO speakers (meeting_id, speaker_id, display_name,
+                                   voiceprint_id, embedding, embedding_backend)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(meeting_id, speaker_id) DO UPDATE SET
+                 voiceprint_id = excluded.voiceprint_id,
+                 embedding = excluded.embedding,
+                 embedding_backend = excluded.embedding_backend",
+            params![
+                meeting_id,
+                speaker_id,
+                fallback_name,
+                voiceprint_id,
+                vector,
+                backend
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Every stored voiceprint, for matching a voice against earlier meetings.
+    pub fn voiceprints(&self) -> Result<Vec<(String, String, Vec<f32>, String)>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT voiceprint_id, display_name, embedding, embedding_backend
+             FROM speakers
+             WHERE voiceprint_id IS NOT NULL AND embedding IS NOT NULL",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                let vector: String = row.get(2)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    serde_json::from_str::<Vec<f32>>(&vector).unwrap_or_default(),
+                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .filter(|(_, _, v, _): &(String, String, Vec<f32>, String)| !v.is_empty())
+            .collect();
+        Ok(rows)
     }
 
     pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
@@ -88,12 +199,20 @@ impl MeetingStore {
              VALUES (?1, ?2, ?3, 'recording', '{}')",
             params![title, started_at, your_name],
         )?;
+        // Read it here, before anything else is inserted. `last_insert_rowid` is per connection,
+        // not per table, so the INSERT into `speakers` below overwrites it — returning that
+        // instead handed the caller a speakers rowid and called it a meeting id. The two happened
+        // to agree for as long as every meeting had exactly one speaker, and stopped agreeing the
+        // moment speaker detection produced a second one: meetings were then recorded against ids
+        // that were never in `meetings` at all, the real rows stayed stuck on "recording", and
+        // opening one reported "Meeting 21 not found".
+        let meeting_id = conn.last_insert_rowid();
         conn.execute(
             "INSERT OR REPLACE INTO speakers (meeting_id, speaker_id, display_name)
              VALUES (?1, 'you', ?2)",
-            params![conn.last_insert_rowid(), your_name],
+            params![meeting_id, your_name],
         )?;
-        Ok(conn.last_insert_rowid())
+        Ok(meeting_id)
     }
 
     pub fn set_status(&self, id: i64, status: MeetingStatus) -> Result<()> {
@@ -318,3 +437,77 @@ fn parse_notes(json: &str) -> MeetingNotes {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meeting::types::AudioSource;
+
+    fn store() -> (MeetingStore, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "handy-store-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let store = MeetingStore::new(dir.clone()).expect("store");
+        store.init().expect("schema");
+        (store, dir)
+    }
+
+    /// The id handed back must name a row in `meetings`.
+    ///
+    /// This passed for as long as every meeting had exactly one speaker, because the meetings id
+    /// and the speakers rowid then advanced in lockstep. The second speaker breaks the tie — so
+    /// the first meeting here is given extra speakers before the second one is created.
+    #[test]
+    fn create_meeting_returns_a_meeting_id_not_a_speakers_rowid() {
+        let (store, dir) = store();
+
+        let first = store.create_meeting("first", "You", 1).expect("first");
+        // Speaker detection finding more voices is what knocked the two counters out of step.
+        for speaker in ["spk_2", "spk_3", "spk_4"] {
+            store.upsert_speaker(first, speaker, "Speaker").expect("speaker");
+        }
+
+        let second = store.create_meeting("second", "You", 2).expect("second");
+        assert_eq!(
+            second,
+            first + 1,
+            "ids should advance by one; got {second} after {first}"
+        );
+
+        // The real symptom: looking the meeting up again.
+        let record = store.get_meeting(second);
+        assert!(
+            record.is_ok(),
+            "the id create_meeting returned does not name a meeting: {:?}",
+            record.err()
+        );
+        assert_eq!(record.unwrap().title, "second");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A meeting's utterances have to land on the meeting the caller was given.
+    #[test]
+    fn utterances_land_on_the_meeting_that_was_created() {
+        let (store, dir) = store();
+        let first = store.create_meeting("first", "You", 1).expect("first");
+        store.upsert_speaker(first, "spk_2", "Speaker 2").expect("speaker");
+        let second = store.create_meeting("second", "You", 2).expect("second");
+
+        store
+            .insert_utterance(second, "you", "You", AudioSource::Microphone, 0, 1000, "hello")
+            .expect("utterance");
+
+        let record = store.get_meeting(second).expect("meeting should exist");
+        assert_eq!(record.utterances.len(), 1);
+        assert_eq!(record.utterances[0].text, "hello");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+

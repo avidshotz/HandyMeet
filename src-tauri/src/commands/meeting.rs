@@ -56,7 +56,11 @@ pub fn export_meeting_markdown(app: AppHandle, id: i64) -> Result<String, String
     meeting_manager(&app)?.export_markdown(id)
 }
 
-#[tauri::command]
+// `async` matters here: without it Tauri runs this on the main thread, and `blocking_save_file`
+// then waits for a dialog that only the main thread can show — the app beach-balls forever with
+// the Save panel stuck. Marking the command async moves it to a worker thread, so the main thread
+// stays free to run the panel.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn save_meeting_markdown(app: AppHandle, id: i64) -> Result<Option<String>, String> {
     let markdown = meeting_manager(&app)?.export_markdown(id)?;

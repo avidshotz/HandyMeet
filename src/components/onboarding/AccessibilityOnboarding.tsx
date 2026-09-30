@@ -235,6 +235,63 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
     }, 1000);
   }, [completeOnboarding, hasWindowsMicrophoneAccess, permissionPlatform, t]);
 
+  /// Ask macOS again, right now.
+  ///
+  /// Needed because a grant that happens while the app is running is invisible to it: macOS
+  /// sends no notification, so the only ways to learn about it are to poll or to look again on
+  /// the user's say-so. Polling can stop (three consecutive errors kills it), and once a card is
+  /// in the "waiting" state it has no button left, so without this the screen can sit there for
+  /// ever showing a spinner for a permission that was granted a minute ago.
+  const recheckNow = useCallback(async () => {
+    try {
+      if (permissionPlatform === "windows") {
+        const microphoneGranted = await hasWindowsMicrophoneAccess();
+        setPermissions({
+          accessibility: "granted",
+          microphone: microphoneGranted ? "granted" : "needed",
+        });
+        if (microphoneGranted) await completeOnboarding();
+        return;
+      }
+      const [accessibilityGranted, microphoneGranted] = await Promise.all([
+        checkAccessibilityPermission(),
+        checkMicrophonePermission(),
+      ]);
+      if (accessibilityGranted) {
+        Promise.all([
+          commands.initializeEnigo(),
+          commands.initializeShortcuts(),
+        ]).catch((e) => console.warn("Failed to initialize after permission grant:", e));
+      }
+      setPermissions((prev) => ({
+        accessibility: accessibilityGranted
+          ? "granted"
+          : prev.accessibility === "waiting"
+            ? "waiting"
+            : "needed",
+        microphone: microphoneGranted
+          ? "granted"
+          : prev.microphone === "waiting"
+            ? "waiting"
+            : "needed",
+      }));
+      if (accessibilityGranted && microphoneGranted) {
+        await completeOnboarding();
+      }
+    } catch (error) {
+      console.error("Re-check failed:", error);
+      toast.error(t("onboarding.permissions.errors.checkFailed"));
+    }
+  }, [completeOnboarding, hasWindowsMicrophoneAccess, permissionPlatform, t]);
+
+  // Returning from System Settings is the likeliest moment for the answer to have changed.
+  useEffect(() => {
+    if (permissionPlatform === null || permissionPlatform === "other") return;
+    const onFocus = () => void recheckNow();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [permissionPlatform, recheckNow]);
+
   // Cleanup polling and timeouts on unmount
   useEffect(() => {
     return () => {
@@ -341,9 +398,17 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                     {t("onboarding.permissions.granted")}
                   </div>
                 ) : permissions.microphone === "waiting" ? (
-                  <div className="flex items-center gap-2 text-text/50 text-sm">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {t("onboarding.permissions.waiting")}
+                  <div className="flex items-center gap-3 text-text/50 text-sm">
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {t("onboarding.permissions.waiting")}
+                    </span>
+                    <button
+                      onClick={() => void recheckNow()}
+                      className="px-3 py-1 rounded-md border border-mid-gray/60 text-text hover:border-logo-primary hover:bg-logo-primary/10 text-sm"
+                    >
+                      {t("onboarding.permissions.checkAgain")}
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -380,9 +445,17 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                     {t("onboarding.permissions.granted")}
                   </div>
                 ) : permissions.accessibility === "waiting" ? (
-                  <div className="flex items-center gap-2 text-text/50 text-sm">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {t("onboarding.permissions.waiting")}
+                  <div className="flex items-center gap-3 text-text/50 text-sm">
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {t("onboarding.permissions.waiting")}
+                    </span>
+                    <button
+                      onClick={() => void recheckNow()}
+                      className="px-3 py-1 rounded-md border border-mid-gray/60 text-text hover:border-logo-primary hover:bg-logo-primary/10 text-sm"
+                    >
+                      {t("onboarding.permissions.checkAgain")}
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -396,6 +469,24 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
             </div>
           </div>
         )}
+
+        <p className="text-xs text-text/50 text-center leading-relaxed px-2">
+          {t("onboarding.permissions.stuckHint")}
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => void recheckNow()}
+            className="px-4 py-2 rounded-lg border border-mid-gray/60 text-text hover:border-logo-primary hover:bg-logo-primary/10 text-sm font-medium transition-colors"
+          >
+            {t("onboarding.permissions.checkAgain")}
+          </button>
+          <button
+            onClick={onComplete}
+            className="px-4 py-2 rounded-lg text-text/60 hover:text-text text-sm transition-colors underline underline-offset-4"
+          >
+            {t("onboarding.permissions.continueAnyway")}
+          </button>
+        </div>
       </div>
     </div>
   );

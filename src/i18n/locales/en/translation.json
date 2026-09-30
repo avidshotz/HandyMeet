@@ -118,7 +118,10 @@
       "errors": {
         "checkFailed": "Failed to check permissions. Please try again.",
         "requestFailed": "Failed to request permission. Please try again."
-      }
+      },
+      "checkAgain": "Check again",
+      "continueAnyway": "Continue without this",
+      "stuckHint": "Switched it on but still waiting? macOS does not tell a running app when a permission changes. Check again, or carry on — you can grant it later from Settings."
     }
   },
   "modelSelector": {
@@ -741,5 +744,23 @@
     "deleteFailed": "Could not delete meeting",
     "exportFailed": "Could not export notes",
     "utteranceCount": "{{count}} lines"
+  },
+  "permissions": {
+    "title": "Permissions",
+    "checkButton": "Check permissions",
+    "checking": "Checking…",
+    "allGranted": "macOS is allowing everything Handy needs.",
+    "outstanding": "{{count}} still to grant. Switch it on in System Settings, then come back — this rechecks itself.",
+    "granted": "granted",
+    "denied": "not granted",
+    "openSettings": "Open Settings",
+    "lastChecked": "Last checked {{time}}.",
+    "staleEntryHint": "If a permission is switched on in System Settings but still shows as not granted, macOS is holding an entry for an older copy of the app. Remove Handy from that list with the minus button, then add it again.",
+    "accessibilityLabel": "Accessibility",
+    "accessibilityWhy": "Lets Handy type transcribed text into whatever app you are using.",
+    "microphoneLabel": "Microphone",
+    "microphoneWhy": "Recording anything at all, including meetings.",
+    "inputMonitoringLabel": "Input monitoring",
+    "inputMonitoringWhy": "Noticing your shortcut key while another app is in front."
   }
 }

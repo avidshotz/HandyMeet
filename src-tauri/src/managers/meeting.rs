@@ -174,18 +174,17 @@ impl MeetingManager {
             format!("Meeting {}", Local::now().format("%b %-d, %-I:%M %p"))
         });
         let started_at = now_ms();
-        let meeting_id = self
-            .store
-            .lock()
-            .unwrap()
-            .create_meeting(&title, &your_name, started_at)
-            .map_err(|e| e.to_string())?;
 
         let settings = get_settings(&self.app_handle);
         if let Some(tm) = self.app_handle.try_state::<Arc<TranscriptionManager>>() {
             tm.initiate_model_load();
         }
         let (frame_tx, frame_rx) = mpsc::channel();
+        // Microphones first, the row second. Capture is the step that actually fails — no
+        // microphone permission, a device that has gone away, no loopback for system audio — and
+        // when the row was written first, every one of those failures left a meeting stranded in
+        // "recording" with nothing in it, for ever. Nothing is written down until there is
+        // something to record.
         let capture = capture::start_dual_capture(
             settings.selected_microphone.clone(),
             settings.selected_channel,
@@ -193,6 +192,20 @@ impl MeetingManager {
             frame_tx,
         )
         .map_err(|e| e.to_string())?;
+
+        let meeting_id = match self
+            .store
+            .lock()
+            .unwrap()
+            .create_meeting(&title, &your_name, started_at)
+        {
+            Ok(id) => id,
+            Err(err) => {
+                // Do not leave the microphone live for a meeting that does not exist.
+                capture.stop();
+                return Err(err.to_string());
+            }
+        };
 
         let stop = Arc::new(AtomicBool::new(false));
         let app = self.app_handle.clone();
@@ -370,8 +383,7 @@ fn run_session(
     // its own tracker (mic could have multiple in-person voices) when the
     // setting is on — off by default reproduces the old "mic is always you"
     // behavior exactly.
-    let mut mic_tracker = SpeakerTracker::new(embedder.clone());
-    let mut sys_tracker = SpeakerTracker::new(embedder);
+    let (mut mic_tracker, mut sys_tracker) = SpeakerTracker::pair(embedder);
     let origin = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
@@ -427,6 +439,34 @@ fn run_session(
     drop(job_tx);
     if let Some(handle) = transcribe_thread {
         let _ = handle.join();
+    }
+
+    // Keep each voice's print alongside the meeting. Without this the clustering is thrown away
+    // when the meeting ends and a voice could never be recognised in a later one. It is stored
+    // separately from display_name, so renaming a speaker never disturbs the identity underneath.
+    // NOT merging clusters here, deliberately. An automatic end-of-meeting merge was written and
+    // then backed out: on a real recording of an interview, one cluster already held both people
+    // (the interviewer's "Stephen, that's fascinating..." sat in the same cluster as Stephen's
+    // own account of starting his podcast). Merging on top of that fuses two speakers into one,
+    // which is worse than the over-splitting it was meant to fix and much harder to notice.
+    // `SpeakerTracker::merge_similar` is kept and tested, for use once clustering runs over
+    // per-utterance embeddings instead of these drifting centroids.
+
+    {
+        let store = manager.store.lock().unwrap();
+        for tracker in [&mic_tracker, &sys_tracker] {
+            for print in tracker.voiceprints() {
+                if let Err(err) = store.save_voiceprint(
+                    meeting_id,
+                    &print.speaker_id,
+                    &print.voiceprint_id,
+                    &print.embedding,
+                    &print.backend,
+                ) {
+                    log::warn!("could not store the voiceprint for {}: {err}", print.speaker_id);
+                }
+            }
+        }
     }
 
     let _ = manager
