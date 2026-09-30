@@ -281,7 +281,7 @@ export const MeetingsView: React.FC = () => {
   const sortedMeetings = useMemo(() => meetings, [meetings]);
 
   return (
-    <div className="flex w-full max-w-6xl min-h-[36rem] gap-3">
+    <div className="flex w-full max-w-6xl h-full min-h-0 gap-3">
       <div className="flex w-56 shrink-0 flex-col min-h-0">
         <p className="text-sm font-semibold mb-2">{t("meetings.past")}</p>
         <div className="flex-1 overflow-y-auto space-y-1 pr-1">

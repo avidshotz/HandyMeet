@@ -303,16 +303,30 @@ function App() {
             activeSection={currentSection}
             onSectionChange={setCurrentSection}
           />
-          {/* Scrollable content area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto">
-              <div className="flex flex-col items-center p-4 gap-4">
-                <AccessibilityPermissions />
-                <SecureInputWarning />
+          {/* Content area: Meetings gets a height-capped layout so its own
+              header/buttons stay put and only the transcript scrolls
+              internally, instead of the page growing with a long meeting
+              and pushing the controls off-screen. Every other section keeps
+              the original natural-height, whole-page-scrolls layout. */}
+          {currentSection === "meetings" ? (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-2">
+              <AccessibilityPermissions />
+              <SecureInputWarning />
+              <div className="flex-1 min-h-0 flex justify-center">
                 {renderSettingsContent(currentSection)}
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto">
+                <div className="flex flex-col items-center p-4 gap-4">
+                  <AccessibilityPermissions />
+                  <SecureInputWarning />
+                  {renderSettingsContent(currentSection)}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         {/* Fixed footer at bottom */}
         <Footer />
