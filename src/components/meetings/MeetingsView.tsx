@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Mic, Square, Trash2, Download, Users } from "lucide-react";
+import { Copy, Mic, Square, Trash2, Download, Users, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   commands,
   events,
@@ -139,6 +140,16 @@ export const MeetingsView: React.FC = () => {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [active?.utterances.length]);
+
+  const openAudioMidiSetup = async () => {
+    try {
+      await openPath("/System/Applications/Utilities/Audio MIDI Setup.app");
+    } catch (error) {
+      toast.error(t("meetings.audioMidiSetupFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   const toggleSpeakerId = async (checked: boolean) => {
     const previous = speakerIdEnabled;
@@ -336,6 +347,14 @@ export const MeetingsView: React.FC = () => {
               ))}
             </select>
           </div>
+          <button
+            type="button"
+            onClick={() => void openAudioMidiSetup()}
+            className="flex items-center gap-1.5 text-xs text-text/60 hover:text-text transition-colors"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            {t("meetings.audioMidiSetupLink")}
+          </button>
           <label className="flex items-start gap-2 text-xs text-text/70">
             <input
               type="checkbox"

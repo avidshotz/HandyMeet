@@ -723,6 +723,8 @@
     "speakerIdHint": "Uses a small on-device voice-ID model to tell speakers apart on both your mic and the call audio, instead of just the call audio.",
     "speakerIdDownloading": "Downloading voice-ID model…",
     "speakerIdToggleFailed": "Could not update speaker detection",
+    "audioMidiSetupLink": "Adjust per-device volume (opens Audio MIDI Setup)",
+    "audioMidiSetupFailed": "Could not open Audio MIDI Setup",
     "start": "Start meeting",
     "stop": "Stop & notes",
     "live": "Live",
